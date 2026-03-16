@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Gemini Pro Stream - Salina Cruz</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos para que el texto fluya como en ChatGPT */
+        .ai-content p { display: inline; margin: 0; }
+        .ai-content br { display: block; content: ""; margin-top: 1rem; }
+        .ai-content strong { font-weight: bold; color: #60a5fa; }
+        .ai-content h3 { display: block; font-size: 1.25rem; font-weight: bold; color: #3b82f6; margin-top: 1rem; }
+        .ai-content ul { list-style-type: disc; margin-left: 1.5rem; display: block; margin-top: 0.5rem; }
+        
+        .loading-pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    </style>
+</head>
+<body class="bg-slate-900 h-screen flex flex-col text-white font-sans">
+    
+    <div class="p-4 bg-blue-700 shadow-xl font-bold text-center tracking-widest">GEMINI STREAMING MODE</div>
+    
+	<div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-6">
+				    <div class="bg-gradient-to-r from-blue-600/20 to-transparent p-6 rounded-2xl border-l-4 border-blue-500 shadow-lg mb-8">
+				        <h2 class="text-xl font-bold text-blue-400 mb-1">¡Hola de nuevo! 👋</h2>
+				        <p class="text-blue-100/80 text-sm leading-relaxed">
+				            Soy tu asistente inteligente. Estoy listo para ayudarte en lo que necesites
+				            <span class="block mt-2 font-medium text-blue-300">¿En qué puedo ayudarte hoy?</span>
+				        </p>
+				    </div>
+				</div>
+
+    <div class="p-4 bg-slate-900 border-t border-slate-700">
+        <form id="chat-form" class="flex space-x-3">
+            <input type="text" id="message-input" 
+                   class="flex-1 bg-slate-800 p-3 rounded-xl outline-none border border-slate-700 focus:border-blue-500" 
+                   placeholder="Escribe aquí..." autocomplete="off">
+            <button type="submit" class="bg-blue-600 px-8 py-3 rounded-xl font-bold hover:bg-blue-500 transition-all">Enviar</button>
+        </form>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const messageInput = document.getElementById('message-input');
+
+        chatForm.addEventListener('submit', async (e) => {
+            // 1. CRUCIAL: Evita que la página se refresque y aparezca el '?' en la URL
+            e.preventDefault(); 
+            
+            const msg = messageInput.value.trim();
+            if(!msg) return;
+            messageInput.value = '';
+
+            // Limpiamos la URL visualmente por si quedó un '?' anterior
+            window.history.replaceState({}, '', window.location.pathname);
+
+            // 2. Mostrar tu mensaje (Derecha)
+            chatMessages.innerHTML += `<div class="flex justify-end mb-4"><span class="bg-blue-600 px-4 py-2 rounded-2xl rounded-tr-none shadow-md">${msg}</span></div>`;
+
+            // 3. Crear burbuja para la respuesta de la IA (Izquierda)
+            const aiDiv = document.createElement('div');
+            aiDiv.className = 'bg-slate-800 p-5 rounded-2xl rounded-tl-none border border-slate-700 max-w-[95%] mb-4';
+            aiDiv.innerHTML = `<span class="text-blue-400 font-bold block mb-2">Gemini AI:</span>`;
+            
+            const aiContent = document.createElement('div');
+            aiContent.className = 'ai-content text-blue-50 leading-relaxed';
+            // Placeholder animado
+            aiContent.innerHTML = '<span class="loading-pulse italic text-blue-300/60">Gemini está procesando tu solicitud...</span>';
+            
+            aiDiv.appendChild(aiContent);
+            chatMessages.appendChild(aiDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                // 4. Petición al backend de Spring Boot
+                const response = await fetch(`/stream?message=${encodeURIComponent(msg)}`);
+                if (!response.ok) throw new Error("El servidor no respondió correctamente");
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = ''; 
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    
+                    // --- LIMPIEZA QUIRÚRGICA ---
+                    // Dividimos por líneas para procesar cada paquete de datos (SSE)
+                    const lines = chunk.split('\n');
+                    lines.forEach(line => {
+                        if (line.startsWith('data:')) {
+                            // Extraemos el contenido después de 'data:' sin recortar espacios valiosos
+                            const content = line.slice(5); 
+                            // Solo quitamos el primer espacio de protocolo si existe
+                            fullText += content.startsWith(' ') ? content.slice(1) : content;
+                        }
+                    });
+
+                    // 5. RENDERIZADO: El texto acumulado pasa por 'marked' para quitar asteriscos
+                    aiContent.innerHTML = marked.parse(fullText);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            } catch (err) {
+                aiContent.innerHTML = `<span class="text-red-400 font-bold italic text-sm">⚠️ Error: ${err.message}. Verifica tu conexión a internet o la consola de Spring Boot.</span>`;
+            }
+        });
+    </script>
+</body>
+</html>
